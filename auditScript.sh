@@ -3,6 +3,8 @@
 hostsSSH="./hostsSSH"
 hostsRSH="./hostsRSH"
 outputDir="/tmp/otherInfo"
+issoGroup="sa"
+exec 2>/dev/null
 
 ###ENDOFCONFIGURATION###
 
@@ -15,32 +17,89 @@ printBanner () {
 
 ###ENDOFFUNCTIONS###
 
+#Cleanup old files
+printf "" > ./hostsSSH.failed
+printf "" > ./hostsRSH.failed
+printf "" > ./aliveHosts
+
 #Collect information via SSH
+#printf "Starting SSH connections...\n"
 for host in $(cat $hostsSSH); do
-	scp -q ./collectOtherInfo.sh $host:/root/collectOtherInfo.sh
-	ssh -t $host "chmod +x /root/collectOtherInfo.sh ; /root/collectOtherInfo.sh"
-	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
-	if [ ! -d /var/log/remotelogs/$hostname/otherInfo/ ]; then
-		mkdir -p /var/log/remotelogs/$hostname/otherInfo/
+	getent hosts $host &> /dev/null
+	result=$?
+	if [ $result -eq 0 ]; then
+		echo "aaaa" > /dev/tcp/$host/22 2>&1 >/dev/null
+		result=$?
+		if [ $result -eq 0 ]; then
+			scp -q ./collectOtherInfo.sh $host:/root/collectOtherInfo.sh 2>/dev/null
+			result=$?
+			if [ $result -eq 0 ]; then
+				ssh -q -t $host "chmod +x /root/collectOtherInfo.sh ; /root/collectOtherInfo.sh 2>/dev/null" 2>/dev/null
+				hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
+				if [ ! -d /var/log/remotelogs/$hostname/otherInfo/ ]; then
+					mkdir -p /var/log/remotelogs/$hostname/otherInfo/
+				fi
+				scp -q $host:/tmp/otherInfo/* /var/log/remotelogs/$hostname/otherInfo/ 2>/dev/null
+				ssh -q -t $host "rm -f /tmp/otherInfo/*; rm /root/collectOtherInfo.sh" 2>/dev/null
+			else
+				printf "$host: Unable to authenticate to SSH server.\n"
+				printf "$host\n" >> ./hostsSSH.failed
+			fi
+		else
+			printf "$host: Unable to connect to SSH server on standard port 22/tcp.\n"
+			printf "$host\n" >> ./hostsSSH.failed
+		fi
+	else
+		printf "$host: Unable to resolve hostname.\n"
+		printf "$host\n" >> ./hostsSSH.failed
 	fi
-	scp -q $host:/tmp/otherInfo/* /var/log/remotelogs/$hostname/otherInfo/
-	ssh -t $host "rm -f /tmp/otherInfo/*; rm /root/collectOtherInfo.sh"
 done
+#printf "SSH connections finished.\n"
 
 #Collect information via RSH
+#printf "Starting RSH connections...\n"
 for host in $(cat $hostsRSH); do
-	rcp ./collectOtherInfo.sh $host:/tmp/collectOtherInfo.sh
-	rsh $host "/tmp/collectOtherInfo.sh 2>/dev/null"
-	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
-	if [ ! -d /var/log/remotelogs/$hostname/otherInfo/ ]; then
-		mkdir -p /var/log/remotelogs/$hostname/otherInfo/
+	getent hosts $host &> /dev/null
+	result=$?
+	if [ $result -eq 0 ]; then
+		echo "aaaa" > /dev/tcp/$host/514 &>/dev/null
+		result=$?
+		if [ $result -eq 0 ]; then
+			rcp ./collectOtherInfo.sh $host:/root/collectOtherInfo.sh 2>/dev/null
+			result=$?
+			if [ $result -eq 0 ]; then
+				rsh $host "chmod +x /root/collectOtherInfo.sh ; /root/collectOtherInfo.sh 2>/dev/null" 2>/dev/null
+				hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
+				if [ ! -d /var/log/remotelogs/$hostname/otherInfo/ ]; then
+					mkdir -p /var/log/remotelogs/$hostname/otherInfo/
+				fi
+				rcp $host:/tmp/otherInfo/* /var/log/remotelogs/$hostname/otherInfo/ 2>/dev/null
+				rsh $host "rm -f /tmp/otherInfo/*; rm /root/collectOtherInfo.sh" 2>/dev/null
+			else
+				printf "$host: Unable to authenticate to RSH server.\n"
+				printf "$host\n" >> ./hostsRSH.failed
+			fi
+		else
+			printf "$host: Unable to connect to rsh server on standard port 514/tcp.\n"
+			printf "$host\n" >> ./hostsRSH.failed
+		fi
+	else
+		printf "$host: Unable to resolve hostname.\n"
+		printf "$host\n" >> ./hostsRSH.failed
 	fi
-	rcp $host:/tmp/otherInfo/* /var/log/remotelogs/$hostname/otherInfo/
-	rsh $host "rm -f /tmp/otherInfo/*; rm /tmp/collectOtherInfo.sh"
 done
+#printf "RSH connections finished.\n"
+
+#Filter out failed hosts
+cat $hostsSSH $hostsRSH | grep -v "$(cat hostsSSH.failed hostsRSH.failed)" > ./aliveHosts
+if [ ! -s ./aliveHosts ]; then
+	printf "No host data gathered. Skipping report generation.\n"
+	exit 1
+fi
+
 
 #Filter out specific lines from Audit Reports
-for host in $(cat $hostsSSH $hostsRSH); do
+for host in $(cat ./aliveHosts); do
 	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
 	date +%Y%m%d >> /var/log/remotelogs/$hostname/otherInfo/removedFromReports
 	for i in $(ls -d /var/log/remotelogs/$hostname/otherInfo/auditReport_*); do
@@ -54,14 +113,15 @@ for host in $(cat $hostsSSH $hostsRSH); do
 done
 
 #Generate Logwatch Reports
-for host in $(cat $hostsSSH $hostsRSH); do
+printf "Generating logwatch report(s) for $(cat ./aliveHosts | wc -l) host(s)...\n"
+for host in $(cat ./aliveHosts); do
 	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
 	logwatch --detail high --numeric --range all --hostlimit $hostname --logdir /var/log/remotelogs/$hostname > /var/log/remotelogs/$hostname/otherInfo/$hostname"_logwatch"`date +%Y%m%d`
 done
 
 #Compile reports
-
-for host in $(cat $hostsSSH $hostsRSH); do
+printf "Generating final report(s) for $(cat ./aliveHosts | wc -l) host(s)...\n"
+for host in $(cat ./aliveHosts); do
 	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
 	if [ ! -d /var/log/completedReports/$hostname ]; then
 		mkdir -p /var/log/completedReports/$hostname/
@@ -193,3 +253,11 @@ for host in $(cat $hostsSSH $hostsRSH); do
 	printf "What should I look for?\nEvents where the auid does not belong to a system administrator or cybersecurity team member.\n\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 	cat /var/log/remotelogs/$hostname/otherInfo/auditReport_encryption_management >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 done
+
+#Set Permissions
+chown -R root:$issoGroup /var/log/completedReports
+chown -R root:$issoGroup /var/log/remotelogs
+find /var/log/completedReports -type d -exec chmod 0750 {} +
+find /var/log/remotelogs -type d -exec chmod 0750 {} +
+find /var/log/completedReports -type f -exec chmod 0640 {} +
+find /var/log/remotelogs -type f -exec chmod 0640 {} +
