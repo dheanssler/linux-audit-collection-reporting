@@ -1,7 +1,7 @@
 #!/bin/bash
 ####SETTINGS####
 outputDir="/tmp/otherInfo"
-#PATH=$PATH:/usr/sbin
+PATH=$PATH:/usr/sbin
 
 #Check if $outputDir exists and if not, create it and its parent directory
 if [ ! -d $outputDir ]; then

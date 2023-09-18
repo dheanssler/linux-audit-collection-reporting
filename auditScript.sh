@@ -5,7 +5,6 @@ hostsRSH="./hostsRSH"
 outputDir="/tmp/otherInfo"
 issoGroup="sa"
 exec 2>/dev/null
-
 ###ENDOFCONFIGURATION###
 
 ###FUNCTIONS###
@@ -17,13 +16,15 @@ printBanner () {
 
 ###ENDOFFUNCTIONS###
 
-#Cleanup old files
+#Cleanup previous files
 printf "" > ./hostsSSH.failed
 printf "" > ./hostsRSH.failed
 printf "" > ./aliveHosts
 
-#Collect information via SSH
-#printf "Starting SSH connections...\n"
+
+########REMOTE INFORMATION COLLECTION AND AUDIT ROTATION########
+
+#SSH
 for host in $(cat $hostsSSH); do
 	getent hosts $host &> /dev/null
 	result=$?
@@ -34,13 +35,15 @@ for host in $(cat $hostsSSH); do
 			scp -q ./collectOtherInfo.sh $host:/root/collectOtherInfo.sh 2>/dev/null
 			result=$?
 			if [ $result -eq 0 ]; then
+				scp -q ./logrotate_client.conf $host:/tmp/logrotate_client.conf 2>/dev/null
 				ssh -q -t $host "chmod +x /root/collectOtherInfo.sh ; /root/collectOtherInfo.sh 2>/dev/null" 2>/dev/null
 				hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
 				if [ ! -d /var/log/remotelogs/$hostname/otherInfo/ ]; then
 					mkdir -p /var/log/remotelogs/$hostname/otherInfo/
 				fi
 				scp -q $host:/tmp/otherInfo/* /var/log/remotelogs/$hostname/otherInfo/ 2>/dev/null
-				ssh -q -t $host "rm -f /tmp/otherInfo/*; rm /root/collectOtherInfo.sh" 2>/dev/null
+				ssh -q -t $host "mkdir -p /var/log/localLogArchive ; logrotate -f /tmp/logrotate_client.conf" 2>/dev/null
+				ssh -q -t $host "rm -f /tmp/otherInfo/*; rm -f /root/collectOtherInfo.sh; rm -f /tmp/logrotate_client.conf" 2>/dev/null
 			else
 				printf "$host: Unable to authenticate to SSH server.\n"
 				printf "$host\n" >> ./hostsSSH.failed
@@ -54,10 +57,9 @@ for host in $(cat $hostsSSH); do
 		printf "$host\n" >> ./hostsSSH.failed
 	fi
 done
-#printf "SSH connections finished.\n"
 
-#Collect information via RSH
-#printf "Starting RSH connections...\n"
+
+#RSH
 for host in $(cat $hostsRSH); do
 	getent hosts $host &> /dev/null
 	result=$?
@@ -68,13 +70,15 @@ for host in $(cat $hostsRSH); do
 			rcp ./collectOtherInfo.sh $host:/root/collectOtherInfo.sh 2>/dev/null
 			result=$?
 			if [ $result -eq 0 ]; then
+				rcp ./logrotate_client.conf $host:/tmp/logrotate_client.conf 2>/dev/null
 				rsh $host "chmod +x /root/collectOtherInfo.sh ; /root/collectOtherInfo.sh 2>/dev/null" 2>/dev/null
 				hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
 				if [ ! -d /var/log/remotelogs/$hostname/otherInfo/ ]; then
 					mkdir -p /var/log/remotelogs/$hostname/otherInfo/
 				fi
 				rcp $host:/tmp/otherInfo/* /var/log/remotelogs/$hostname/otherInfo/ 2>/dev/null
-				rsh $host "rm -f /tmp/otherInfo/*; rm /root/collectOtherInfo.sh" 2>/dev/null
+				rsh $host "mkdir -p /var/log/localLogArchive ; logrotate -f /tmp/logrotate_client.conf" 2>/dev/null
+				rsh $host "rm -f /tmp/otherInfo/*; rm -f /root/collectOtherInfo.sh; rm -f /tmp/logrotate_client.conf" 2>/dev/null
 			else
 				printf "$host: Unable to authenticate to RSH server.\n"
 				printf "$host\n" >> ./hostsRSH.failed
@@ -88,14 +92,24 @@ for host in $(cat $hostsRSH); do
 		printf "$host\n" >> ./hostsRSH.failed
 	fi
 done
-#printf "RSH connections finished.\n"
+
+
+########LOCAL SERVER INFORMATION COLLECTION########
+
+#Collect information from local host
+./collectOtherInfo.sh
+
+########PRE-REPORT FILTERING########
 
 #Filter out failed hosts
+skip=""
 cat $hostsSSH $hostsRSH | grep -v "$(cat hostsSSH.failed hostsRSH.failed)" > ./aliveHosts
 if [ ! -s ./aliveHosts ]; then
-	printf "No host data gathered. Skipping report generation.\n"
-	exit 1
+	printf "No host data gathered. Skipping report generation for remote clients.\n"
+	skip="true"
 fi
+
+#TODO: Implement skipping remote report generation if no remote hosts succeed
 
 
 #Filter out specific lines from Audit Reports
@@ -112,15 +126,19 @@ for host in $(cat ./aliveHosts); do
 	done
 done
 
+
+########REPORT GENERATION########
+#TODO: Include AIDE and other useful information
+
 #Generate Logwatch Reports
-printf "Generating logwatch report(s) for $(cat ./aliveHosts | wc -l) host(s)...\n"
+printf "Generating logwatch report(s) for $(cat ./aliveHosts | wc -l) remote host(s)...\n"
 for host in $(cat ./aliveHosts); do
 	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
 	logwatch --detail high --numeric --range all --hostlimit $hostname --logdir /var/log/remotelogs/$hostname > /var/log/remotelogs/$hostname/otherInfo/$hostname"_logwatch"`date +%Y%m%d`
 done
 
 #Compile reports
-printf "Generating final report(s) for $(cat ./aliveHosts | wc -l) host(s)...\n"
+printf "Generating final report(s) for $(cat ./aliveHosts | wc -l) remote host(s)...\n"
 for host in $(cat ./aliveHosts); do
 	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
 	if [ ! -d /var/log/completedReports/$hostname ]; then
@@ -254,6 +272,9 @@ for host in $(cat ./aliveHosts); do
 	cat /var/log/remotelogs/$hostname/otherInfo/auditReport_encryption_management >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 done
 
+#Compile report for local host
+./localAuditReportGen.sh
+
 #Set Permissions
 chown -R root:$issoGroup /var/log/completedReports
 chown -R root:$issoGroup /var/log/remotelogs
@@ -261,3 +282,48 @@ find /var/log/completedReports -type d -exec chmod 0750 {} +
 find /var/log/remotelogs -type d -exec chmod 0750 {} +
 find /var/log/completedReports -type f -exec chmod 0640 {} +
 find /var/log/remotelogs -type f -exec chmod 0640 {} +
+
+
+########SERVER LOG ROTATION########
+#TODO rotate audit logs
+#TODO archive otherInfo
+
+#Create log archive locations for alive remote hosts if necessary
+for host in $(cat ./aliveHosts); do
+	if [ ! -d /var/log/remotelogs/$hostname/localLogArchive/ ]; then
+		mkdir -p /var/log/remotelogs/$hostname/localLogArchive/
+	fi
+done
+
+#Create log archive locations for server if necessary
+if [ ! -d /var/log/localLogArchive/ ]; then
+	mkdir -p /var/log/localLogArchive/
+fi
+
+#Generate logrotate configuration file that will only rotate the logs for alive hosts
+cp -f ./logrotate_server.conf ./logrotate_server_dyn.conf
+
+for host in $(cat ./aliveHosts); do
+	hostname=$(echo $host | awk -F "." '{print $1}') #included to extract the hostname from a FQDN
+	printf "/var/log/remotelogs/$hostname/firewall_blocked.log " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/messages " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/secure " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/syslog " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/kern.log " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/mail.log " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/daemon.log " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/cron " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/user.log " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/print.log " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/boot.log " >> ./logrotate_server_dyn.conf
+	printf "/var/log/remotelogs/$hostname/aide.log " >> ./logrotate_server_dyn.conf
+done
+
+printf "{\n" >> ./logrotate_server_dyn.conf
+printf "\tpostrotate\n" >> ./logrotate_server_dyn.conf
+printf "\t\t/usr/bin/systemctl kill -s HUP rsyslog.service >/dev/null 2>&1 || true\n" >> ./logrotate_server_dyn.conf
+printf "\tendscript\n" >> ./logrotate_server_dyn.conf
+printf "}\n" >> ./logrotate_server_dyn.conf
+
+#Run logrotate
+logrotate -f ./logrotate_server_dyn.conf
