@@ -165,8 +165,23 @@ printBanner "Encryption Management" >> /var/log/completedReports/$hostname/$host
 printf "What is included?\nSuccessful/unsuccessful attempts to view or modify cryptographic key information for data at rest mechanisms.\n\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 printf "What should I look for?\nEvents where the auid does not belong to a system administrator or cybersecurity team member.\n\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 cat /var/log/otherInfo/auditReport_encryption_management >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+###
+printBanner "Other Section" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+printf "Users logged in when report was generated:\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+cat /var/log/otherInfo/loggedOnUsers >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+printf "Failed login attempts:\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+cat /var/log/otherInfo/failedLogins >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+printf "Successful login attempts:\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+cat /var/log/otherInfo/logins >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+printf "User Connect Time by User (in hours):\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
+cat /var/log/otherInfo/acctDetail >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 
 #Set Permissions
 chown -R root:$issoGroup /var/log/otherInfo
 find /var/log/otherInfo -type d -exec chmod 0750 {} +
 find /var/log/otherInfo -type f -exec chmod 0640 {} +
+
+
+#Trim wtmp and btmp
+printf "" > /var/log/wtmp
+printf "" > /var/log/btmp

@@ -17,21 +17,21 @@ w >> $outputDir"/loggedOnUsers"
 ########
 grep 'authentication failure' /var/log/messages | grep -v "grep 'authentication failure'" >> $outputDir"/failedLogins"
 printf "\n"  >> $outputDir"failedLogins"
-grep -e 'authentication failure' -e 'FAILED LOGIN' -e 'Failed password' -e deny /var/log/secure | grep -v "grep -e authentication" >> $outputDir"/failedLogins"
+grep -e 'authentication failure' -e 'FAILED LOGIN' -e 'Failed password' -e deny /var/log/secure | grep -v "grep -e authentication" >> $outputDir"/failedLogins" #CHECK if logwatch reports the auth failure 9/18 0815
 printf "\n"  >> $outputDir"failedLogins"
-lastb  >> $outputDir"failedLogins"
+lastb  >> $outputDir"failedLogins" #Outputs bad login attempts from /var/log/btmp.
 
 ########
 last | grep -v -e'root\s*cron' >> $outputDir"/logins"
 
 ########
-grep '(su)' /var/log/messages >> $outputDir"/authLogins"
+#grep '(su)' /var/log/messages >> $outputDir"/authLogins" #already covered by logwatch and auditd
 
 ########
-grep -e 'su(' -e 'su\[' -e 'su:' -e 'sudo:' /var/log/secure | grep -v grep | grep -v 'user news' >> $outputDir"/suLogins"
+#grep -e 'su(' -e 'su\[' -e 'su:' -e 'sudo:' /var/log/secure | grep -v grep | grep -v 'user news' >> $outputDir"/suLogins" #already covered by logwatch and auditd
 
 ########
-grep -i -e 'password changed' -e 'password not' /var/log/secure >> $outputDir"/passwdChanges"
+grep -i -e 'password changed' -e 'password not' /var/log/secure >> $outputDir"/passwdChanges" #CHECK if logwatch reports the password change
 
 ########
 grep 'Interface ' /var/log/messages | grep -v grep >> $outputDir"/networkActivity"
@@ -43,8 +43,8 @@ grep -i 'server administrator' /var/log/messages >> $outputDir"/saProblems"
 grep -i 'pam_tally' /var/log/secure | grep -v grep >> $outputDir"/denialOfSystem"
 
 
-sa -a >> $outputDir"/acctSummary"
-sa -cm >> $outputDir"/acctSummary"
+sa -a >> $outputDir"/acctSummary" #Process accounting information
+sa -cm >> $outputDir"/acctSummary" #Process accounting information
 
 
 ac -p >> $outputDir"/acctDetail"
@@ -53,7 +53,7 @@ ac -p >> $outputDir"/acctDetail"
 #cat /var/log/messages >> $outputDir"/messages" #CAPTURED BY RSYSLOG
 
 
-dmesg -c >> $outputDir"/errorLogger"
+#dmesg -c >> $outputDir"/errorLogger" #doesn't produce valuable output as the ring buffer will most likely be filled with firewall reject events
 
 
 ausearch -i -k identity  >> $outputDir"/auditFull_identity"
@@ -119,3 +119,7 @@ ausearch -k audit-tools | aureport -i -f >> $outputDir"/auditReport_audit-tools"
 ausearch -k security-relevant-object | aureport -i -u --summary >> $outputDir"/auditReport_security-relevant-object"
 ausearch -k encryption_management | aureport -i -u --summary >> $outputDir"/auditReport_encryption_management"
 ausearch -k encryption_management | aureport -i --comm >> $outputDir"/auditReport_encryption_management"
+
+#Trim wtmp and btmp
+printf "" > /var/log/wtmp
+printf "" > /var/log/btmp
