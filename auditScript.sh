@@ -282,7 +282,6 @@ if [ $skip = "true" ]; then
 		cat /var/log/remotelogs/$hostname/otherInfo/logins >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 		printf "User Connect Time by User (in hours):\n" >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
 		cat /var/log/remotelogs/$hostname/otherInfo/acctDetail >> /var/log/completedReports/$hostname/$hostname"_Report_"`date +%Y%m%d`
-		acctDetail
 	done
 fi
 #Compile report for local host
